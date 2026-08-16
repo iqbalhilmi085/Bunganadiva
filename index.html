@@ -213,6 +213,21 @@
             <span class="material-symbols-outlined text-sm md:text-base">arrow_back</span>
         </button>
 
+        <!-- Play / Pause Control -->
+        <button id="play-pause-btn" onclick="togglePlayPause()"
+            class="hidden absolute top-6 right-6 z-30 p-3 rounded-full bg-black/45 backdrop-blur-md border border-white/10 text-white/80 hover:text-white hover:bg-black/60 hover:scale-105 active:scale-95 transition-all flex items-center justify-center shadow-lg"
+            aria-label="Play atau pause">
+            <span class="material-symbols-outlined text-sm md:text-base">pause</span>
+        </button>
+
+        <!-- Unmute Hint -->
+        <button id="unmute-btn" onclick="toggleMute()"
+            class="hidden absolute top-20 right-6 z-30 py-2 px-4 rounded-full bg-black/55 backdrop-blur-md border border-white/10 text-white/90 text-xs font-semibold flex items-center gap-1.5 hover:bg-black/70 active:scale-95 transition-all shadow-lg"
+            aria-label="Aktifkan suara">
+            <span class="material-symbols-outlined text-sm">volume_off</span>
+            Tap to unmute
+        </button>
+
         <!-- Lyrics (tap to continue) -->
         <div class="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 cursor-pointer active:scale-[0.99] transition-transform"
             id="lyrics-area" onclick="nextTrack()">
@@ -226,14 +241,29 @@
         <div class="absolute inset-y-0 right-0 z-10 w-[35%]" onclick="nextTrack()" aria-label="Lagu berikutnya"></div>
 
     </div>
+    <!-- Hidden YouTube Player (audio-only; tetap ada di DOM, bukan display:none, agar autoplay stabil) -->
+    <div id="youtube-player"
+        style="position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:0;"
+        aria-hidden="true"></div>
     <script src="config.js"></script>
+    <script>
+        // Load YouTube IFrame API secara asinkron
+        var ytTag = document.createElement('script');
+        ytTag.src = "https://www.youtube.com/iframe_api";
+        var firstScriptTag = document.getElementsByTagName('script')[0];
+        firstScriptTag.parentNode.insertBefore(ytTag, firstScriptTag);
+    </script>
     <script>
         // App State
         let state = {
             playedTracks: new Set(),
             track3Unlocked: false,
-            currentTrack: null
+            currentTrack: null,
+            userUnmuted: false,
+            unmuteTimer: null
         };
+
+        let player = null;
 
         // Gate & QR Logic
         document.addEventListener('DOMContentLoaded', () => {
@@ -269,11 +299,94 @@
             const gate = document.getElementById('gate-screen');
             const app = document.getElementById('app-content');
 
+            if (player) player.pauseVideo();
+
             app.style.opacity = '0';
             gate.style.display = 'flex';
             requestAnimationFrame(() => {
                 gate.classList.remove('hidden-gate');
             });
+        }
+
+        // YouTube Audio Player
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('youtube-player', {
+                width: '1',
+                height: '1',
+                playerVars: {
+                    autoplay: 0,
+                    controls: 0,
+                    disablekb: 1,
+                    fs: 0,
+                    playsinline: 1,
+                    rel: 0,
+                    iv_load_policy: 3,
+                    modestbranding: 1
+                },
+                events: {
+                    onStateChange: onPlayerStateChange
+                }
+            });
+        }
+
+        function playYoutube(id) {
+            const track = CONFIG.tracks[id];
+            if (!player || !track || !track.youtubeId) return;
+
+            clearTimeout(state.unmuteTimer);
+            try { player.pauseVideo(); } catch (e) {}
+
+            player.loadVideoById(track.youtubeId);
+            player.playVideo();
+
+            // Jika browser memblokir autoplay: mute dulu, lalu beri tahu via tombol unmute
+            state.unmuteTimer = setTimeout(() => {
+                if (player && player.getPlayerState() !== YT.PlayerState.PLAYING) {
+                    player.mute();
+                    player.playVideo();
+                    if (!state.userUnmuted) showUnmuteButton();
+                }
+            }, 1000);
+        }
+
+        function onPlayerStateChange() {
+            updatePlayPauseIcon();
+        }
+
+        function updatePlayPauseIcon() {
+            const btn = document.getElementById('play-pause-btn');
+            if (!btn || !player) return;
+            const icon = btn.querySelector('.material-symbols-outlined');
+            icon.textContent = player.getPlayerState() === YT.PlayerState.PLAYING ? 'pause' : 'play_arrow';
+        }
+
+        function togglePlayPause() {
+            if (!player) return;
+            if (player.getPlayerState() === YT.PlayerState.PLAYING) {
+                player.pauseVideo();
+            } else {
+                player.playVideo();
+            }
+        }
+
+        function toggleMute() {
+            if (!player) return;
+            if (player.isMuted()) {
+                player.unMute();
+                player.playVideo();
+                state.userUnmuted = true;
+                hideUnmuteButton();
+            }
+        }
+
+        function showUnmuteButton() {
+            const btn = document.getElementById('unmute-btn');
+            if (btn) btn.classList.remove('hidden');
+        }
+
+        function hideUnmuteButton() {
+            const btn = document.getElementById('unmute-btn');
+            if (btn) btn.classList.add('hidden');
         }
 
         // Playback Logic
@@ -292,6 +405,15 @@
                 lyricEl.innerHTML = track.lyric;
                 lyricEl.style.opacity = '1';
             }, 300);
+
+            const playBtn = document.getElementById('play-pause-btn');
+            if (track.youtubeId) {
+                if (playBtn) playBtn.classList.remove('hidden');
+                playYoutube(id);
+            } else if (playBtn) {
+                playBtn.classList.add('hidden');
+                hideUnmuteButton();
+            }
 
             checkUnlock();
             if (id === 3) fireConfetti(); // Finale celebration
