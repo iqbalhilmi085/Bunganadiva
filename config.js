@@ -23,7 +23,7 @@ const CONFIG = {
             title: "Perfect",
             artist: "Ed Sheeran",
             bg: "https://lh3.googleusercontent.com/aida-public/AB6AXuAn24JxgnYjOOR19o7g4_20mXpvafW8s0qOLhHUw0dLDBkBV8Ww7v5TZ7gAn4L_AguUt5wKY2zjv7e-P42osQ2hbe0i8uJIg50vttC-U1UBBw6xKwQjTAvqyqlUQ9HDAPA0LSpQ1UM4Ii2ORA34lksY1emxVZFPxNSigX9C90vzEKS179hzxYvSB1szFbWHcAql1sB5HGNb3w6_Pz2hD92rTWqkF5s8huGm3TcrPh8oAyI-ai_4NYVM5dNzbT5CPi9nxg",
-            lyric: "Walking towards a future with you is the only dream I ever want to chase. To us, and to every tomorrow.<br/><br/>Sampai Menikah ❤️"
+            lyric: "Walking towards a future with you is the only dream I ever want to chase. To us, and to every tomorrow."
         }
     }
 };
