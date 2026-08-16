@@ -154,6 +154,28 @@
         #lyric-text {
             transition: opacity 0.3s ease;
         }
+
+        .lyric-line {
+            animation: lyric-fade-up 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+            margin-bottom: 1rem;
+        }
+
+        .lyric-line:last-child {
+            margin-bottom: 0;
+        }
+
+        @keyframes lyric-fade-up {
+            from {
+                opacity: 0;
+                transform: translateY(16px) scale(0.985);
+                filter: blur(4px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                filter: blur(0);
+            }
+        }
     </style>
 </head>
 
@@ -232,7 +254,7 @@
         </button>
 
         <!-- Lyrics (tap to continue) -->
-        <div class="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 cursor-pointer active:scale-[0.99] transition-transform"
+        <div class="relative z-10 flex-1 flex flex-col items-center justify-end text-center px-6 pb-16 cursor-pointer active:scale-[0.99] transition-transform"
             id="lyrics-area" onclick="nextTrack()">
             <p id="lyric-text" class="font-lyric italic text-white/95 drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]"
                 style="opacity: 0; font-size: clamp(22px, 6vw, 30px); line-height: 1.65; font-weight: 500; letter-spacing: 0.01em; max-width: 30rem;"></p>
@@ -263,7 +285,9 @@
             track3Unlocked: false,
             currentTrack: null,
             userUnmuted: false,
-            unmuteTimer: null
+            unmuteTimer: null,
+            lyricTimer: null,
+            lyricTimeouts: []
         };
 
         let player = null;
@@ -303,6 +327,7 @@
             const app = document.getElementById('app-content');
 
             if (player) player.pauseVideo();
+            stopLyricSync();
 
             app.style.opacity = '0';
             gate.style.display = 'flex';
@@ -337,17 +362,23 @@
             if (!player || !track || !track.youtubeId) return;
 
             clearTimeout(state.unmuteTimer);
-            try { player.pauseVideo(); } catch (e) {}
 
-            player.loadVideoById(track.youtubeId);
+            // loadVideoById sudah menghentikan video lama; JANGAN panggil pauseVideo()
+            // sebelum load, karena bisa membuat video baru tetap berstatus paused.
+            player.loadVideoById({ videoId: track.youtubeId, startSeconds: track.startSeconds || 0 });
             player.playVideo();
 
-            // Jika browser memblokir autoplay: mute dulu, lalu beri tahu via tombol unmute
+            // Jika autoplay diblokir: coba sekali lagi, lalu mute + beri tahu via tombol unmute
             state.unmuteTimer = setTimeout(() => {
-                if (player && player.getPlayerState() !== YT.PlayerState.PLAYING) {
-                    player.mute();
+                if (player && player.getPlayerState && player.getPlayerState() !== YT.PlayerState.PLAYING) {
                     player.playVideo();
-                    if (!state.userUnmuted) showUnmuteButton();
+                    setTimeout(() => {
+                        if (player && player.getPlayerState && player.getPlayerState() !== YT.PlayerState.PLAYING) {
+                            player.mute();
+                            player.playVideo();
+                            if (!state.userUnmuted) showUnmuteButton();
+                        }
+                    }, 700);
                 }
             }, 1000);
         }
@@ -392,6 +423,60 @@
             if (btn) btn.classList.add('hidden');
         }
 
+        // Lyrics Sync
+        function startLyricSync(track) {
+            const lyricEl = document.getElementById('lyric-text');
+            if (!lyricEl) return;
+
+            stopLyricSync();
+            lyricEl.innerHTML = '';
+            lyricEl.style.opacity = '1';
+
+            const lines = (track.lines || []).slice().sort((a, b) => a.time - b.time);
+            if (!lines.length) return;
+
+            let shown = 0;
+
+            function appendLine(text) {
+                const div = document.createElement('div');
+                div.className = 'lyric-line';
+                div.textContent = text;
+                lyricEl.appendChild(div);
+            }
+
+            function showUpTo(elapsed) {
+                while (shown < lines.length && elapsed >= lines[shown].time) {
+                    appendLine(lines[shown].text);
+                    shown++;
+                }
+            }
+
+            if (player && track.youtubeId) {
+                // Sinkron ke waktu video (polling getCurrentTime setiap ~200ms)
+                state.lyricTimer = setInterval(() => {
+                    let t = 0;
+                    try { t = player.getCurrentTime(); } catch (e) {}
+                    showUpTo(t - (track.startSeconds || 0));
+                }, 200);
+            } else {
+                // Fallback tanpa lagu: tampilkan bertahap pakai setTimeout
+                lines.forEach((line, i) => {
+                    state.lyricTimeouts.push(setTimeout(() => {
+                        appendLine(line.text);
+                    }, Math.max(0, line.time * 1000)));
+                });
+            }
+        }
+
+        function stopLyricSync() {
+            if (state.lyricTimer) {
+                clearInterval(state.lyricTimer);
+                state.lyricTimer = null;
+            }
+            state.lyricTimeouts.forEach(clearTimeout);
+            state.lyricTimeouts = [];
+        }
+
         // Playback Logic
         function playTrack(id) {
             const track = CONFIG.tracks[id];
@@ -403,9 +488,10 @@
 
             const lyricEl = document.getElementById('lyric-text');
             lyricEl.style.opacity = '0';
+            stopLyricSync();
             setTimeout(() => {
                 document.getElementById('bg-photo').src = track.bg;
-                lyricEl.innerHTML = track.lyric;
+                startLyricSync(track);
                 lyricEl.style.opacity = '1';
             }, 300);
 
