@@ -156,12 +156,23 @@
         }
 
         .lyric-line {
+            opacity: 1;
             animation: lyric-fade-up 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+            transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+                transform 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+                filter 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+            will-change: opacity, transform, filter;
             margin-bottom: 1rem;
         }
 
         .lyric-line:last-child {
             margin-bottom: 0;
+        }
+
+        .lyric-line.is-prev {
+            opacity: 0.32;
+            transform: translateY(-10px) scale(0.96);
+            filter: blur(1.5px);
         }
 
         @keyframes lyric-fade-up {
@@ -256,8 +267,8 @@
         <!-- Lyrics (tap to continue) -->
         <div class="relative z-10 flex-1 flex flex-col items-center justify-end text-center px-6 pb-16 cursor-pointer active:scale-[0.99] transition-transform"
             id="lyrics-area" onclick="nextTrack()">
-            <p id="lyric-text" class="font-lyric italic text-white/95 drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]"
-                style="opacity: 0; font-size: clamp(22px, 6vw, 30px); line-height: 1.65; font-weight: 500; letter-spacing: 0.01em; max-width: 30rem;"></p>
+            <div id="lyric-text" class="font-lyric italic text-white/95 drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]"
+                style="opacity: 0; font-size: clamp(22px, 6vw, 30px); line-height: 1.65; font-weight: 500; letter-spacing: 0.01em; max-width: 30rem; min-height: 3.4em;"></div>
             <span class="material-symbols-outlined text-on-surface-variant mt-8"
                 style="font-variation-settings: 'FILL' 1;">touch_app</span>
         </div>
@@ -286,7 +297,7 @@
             currentTrack: null,
             userUnmuted: false,
             unmuteTimer: null,
-            lyricTimer: null,
+            lyricRaf: null,
             lyricTimeouts: []
         };
 
@@ -438,10 +449,22 @@
             let shown = 0;
 
             function appendLine(text) {
+                const existing = lyricEl.querySelectorAll('.lyric-line');
+                // Baris sebelumnya → is-prev (redup + naik), sisakan maksimal 2 baris di DOM
+                if (existing.length) {
+                    existing[existing.length - 1].classList.add('is-prev');
+                }
+                for (let i = 0; i < existing.length - 1; i++) {
+                    existing[i].remove();
+                }
                 const div = document.createElement('div');
                 div.className = 'lyric-line';
                 div.textContent = text;
                 lyricEl.appendChild(div);
+                // Setelah animasi masuk selesai, lepas animation agar transisi is-prev berjalan
+                div.addEventListener('animationend', function () {
+                    this.style.animation = 'none';
+                }, { once: true });
             }
 
             function showUpTo(elapsed) {
@@ -452,12 +475,14 @@
             }
 
             if (player && track.youtubeId) {
-                // Sinkron ke waktu video (polling getCurrentTime setiap ~200ms)
-                state.lyricTimer = setInterval(() => {
+                // Sinkron ke waktu video pakai requestAnimationFrame agar mulus
+                function tick() {
                     let t = 0;
                     try { t = player.getCurrentTime(); } catch (e) {}
                     showUpTo(t - (track.startSeconds || 0));
-                }, 200);
+                    state.lyricRaf = requestAnimationFrame(tick);
+                }
+                state.lyricRaf = requestAnimationFrame(tick);
             } else {
                 // Fallback tanpa lagu: tampilkan bertahap pakai setTimeout
                 lines.forEach((line, i) => {
@@ -469,9 +494,9 @@
         }
 
         function stopLyricSync() {
-            if (state.lyricTimer) {
-                clearInterval(state.lyricTimer);
-                state.lyricTimer = null;
+            if (state.lyricRaf) {
+                cancelAnimationFrame(state.lyricRaf);
+                state.lyricRaf = null;
             }
             state.lyricTimeouts.forEach(clearTimeout);
             state.lyricTimeouts = [];
